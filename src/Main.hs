@@ -5,11 +5,12 @@ import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
 import qualified Text.Parsec.Token as Tok
 
-data Type = IntegerType | StringType deriving (Show)
+data Type = IntegerType | StringType | CustomType String [(String, Type)] deriving (Show)
 
 data Expr
   = IntLiteral Integer
   | StringLiteral String
+  | TypeDecl String [(String, Type)] -- for custom types
   | VarDecl String Type Expr
   deriving (Show)
 
@@ -24,6 +25,20 @@ lexer = Tok.makeTokenParser style
           Tok.reservedNames = names,
           Tok.commentLine = "#"
         }
+
+field :: Parser (String, Type)
+field = do
+  fieldName <- Tok.identifier lexer
+  fType <- varType
+  return (fieldName, fType)
+
+typeDecl :: Parser Expr
+typeDecl = do
+  _ <- Tok.symbol lexer "data"
+  typeName <- Tok.identifier lexer
+  _ <- Tok.symbol lexer "="
+  fields <- Tok.braces lexer (field `sepBy` (Tok.symbol lexer ","))
+  return $ TypeDecl typeName fields
 
 integer :: Parser Expr
 integer = IntLiteral . fromIntegral <$> Tok.integer lexer
@@ -53,19 +68,30 @@ parseTestVar :: String -> Either ParseError Expr
 parseTestVar input = parse varDecl "" input
 
 generateTypeScript :: Expr -> String
-generateTypeScript (IntLiteral i) = show i
-generateTypeScript (StringLiteral s) = show s
-generateTypeScript (VarDecl name IntegerType value) =
-  "let " ++ name ++ ": number = " ++ generateTypeScript value ++ ";"
-generateTypeScript (VarDecl name StringType value) =
-  "let " ++ name ++ ": string = " ++ generateTypeScript value ++ ";"
+generateTypeScript (TypeDecl name fields) =
+  "interface " ++ name ++ " {\n" ++ concatMap generateField fields ++ "}"
+  where
+    generateField (fname, ftype) = "  " ++ fname ++ ": " ++ generateTypeScriptType ftype ++ ";\n"
+generateTypeScript (VarDecl name vtype value) =
+  "let " ++ name ++ ": " ++ generateTypeScriptType vtype ++ " = " ++ generateValue value ++ ";"
+  where
+    generateValue (IntLiteral i) = show i
+    generateValue (StringLiteral s) = show s
+
+generateTypeScriptType :: Type -> String
+generateTypeScriptType IntegerType = "number"
+generateTypeScriptType StringType = "string"
+generateTypeScriptType (CustomType name _) = name
 
 main :: IO ()
 main = do
   let intTest = VarDecl "x" IntegerType (IntLiteral 42)
 
+  -- This should produce "interface User { name: string; age: number; }"
+  let userTest = TypeDecl "User" [("name", StringType), ("age", IntegerType)]
+
   -- This should produce "let y: string = \"Hello\";"
   let strTest = VarDecl "y" StringType (StringLiteral "Hello")
 
-  let ast = map generateTypeScript [intTest, strTest]
+  let ast = map generateTypeScript [intTest, userTest, strTest]
   writeFile "output.ts" $ unlines ast
