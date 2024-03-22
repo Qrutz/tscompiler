@@ -40,5 +40,12 @@ varDecl = do
 parseTestVar :: String -> Either ParseError Expr
 parseTestVar input = parse varDecl "" input
 
+generateTypeScript :: Expr -> String
+generateTypeScript (IntLiteral i) = show i
+generateTypeScript (VarDecl name IntegerType value) =
+  "let " ++ name ++ ": number = " ++ generateTypeScript value ++ ";"
+
 main :: IO ()
-main = print $ parseTestVar "x :: Integer = 5"
+main = do
+  let ast = VarDecl "x" IntegerType (IntLiteral 42)
+  putStrLn $ generateTypeScript ast
